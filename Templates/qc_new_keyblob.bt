@@ -1,0 +1,32 @@
+//------------------------------------------------
+//--- 010 Editor v8.0.1 Binary Template
+//
+//      File: qc_new_keyblob
+//   Authors: Bjoern Kerler
+//   Version: 1.0
+//   Purpose: 
+//  Category: QC
+// File Mask: 
+//  ID Bytes: 
+//   History: 
+//------------------------------------------------
+struct qc_new_keyblob
+{
+    unsigned char auth_tag[0x20];
+    unsigned int64 unk1;
+    unsigned int KM_CIPHER_PARAM_MODE;
+    unsigned int KM_CIPHER_PARAM_PAD;
+    unsigned int unk1;
+    unsigned int unk2;
+    unsigned int unk3;
+    unsigned int unk4;
+    unsigned int KM_CIPHER_PARAM_IV_LENGTH;
+    unsigned char reserved[0x4C];
+    unsigned char KM_CIPHER_PARAM_IV[KM_CIPHER_PARAM_IV_LENGTH];
+    unsigned char reserved2[0x80];
+    unsigned char keyblob_enc[0x460];
+};
+
+
+qc_new_keyblob keyblob;
+

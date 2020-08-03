@@ -1,0 +1,22 @@
+//------------------------------------------------
+//--- 010 Editor v8.0.1 Binary Template
+//
+//      File: qc_ice_key.bt
+//   Authors: Bjoern Kerler
+//   Version: 1.0
+//   Purpose: 
+//  Category: QC
+// File Mask: 
+//  ID Bytes: 
+//   History: 
+//------------------------------------------------
+struct ice_key
+{
+    unsigned char salt[0x1C];
+    unsigned char iv[0xC];
+    unsigned char tag_auth[0x10];
+    unsigned char ct[0x20];
+    unsigned int tries;
+};
+
+ice_key key;

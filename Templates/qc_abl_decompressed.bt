@@ -1,0 +1,74 @@
+//------------------------------------------------
+//--- 010 Editor v9.0.2 Binary Template
+//
+//      File: qc_abl_decompressed.bt
+//   Authors: Bjoern Kerler
+//   Version: 1.0
+//   Purpose: 
+//  Category: QC
+// File Mask: 
+//  ID Bytes: 
+//   History: 
+//------------------------------------------------
+
+// Volume header
+typedef struct _EFI_FIRMWARE_VOLUME_HEADER {
+    unsigned char               ZeroVector[16];
+    unsigned char               FileSystemGuid[16];
+    unsigned int64              FvLength;
+    unsigned int                Signature;
+    unsigned int                Attributes;
+    unsigned short              HeaderLength;
+    unsigned short              Checksum;
+    unsigned short              ExtHeaderOffset;  //Reserved in Revision 1
+    unsigned char               Reserved;
+    unsigned char               Revision;
+} EFI_FIRMWARE_VOLUME_HEADER;
+
+typedef struct _EFI_FIRMWARE_VOLUME_EXT_HEADER {
+    unsigned char          FvName[16];
+    unsigned int           ExtHeaderSize;
+} EFI_FIRMWARE_VOLUME_EXT_HEADER;
+
+
+typedef struct _EFI_COMMON_SECTION_HEADER {
+    unsigned char    Size[3];
+    unsigned char    Type;
+} EFI_COMMON_SECTION_HEADER;
+
+typedef struct _EFI_FV_BLOCK_MAP_ENTRY {
+    unsigned int  NumBlocks;
+    unsigned int  Length;
+} EFI_FV_BLOCK_MAP_ENTRY;
+
+typedef union {
+    struct {
+        unsigned char   Header;
+        unsigned char   File;
+    } Checksum;
+    unsigned short TailReference;   // Revision 1
+    unsigned short Checksum16;      // Revision 2
+} EFI_FFS_INTEGRITY_CHECK;
+
+typedef struct _EFI_FFS_FILE_HEADER {
+    unsigned char           Name[16];
+    EFI_FFS_INTEGRITY_CHECK IntegrityCheck;
+    unsigned char                   Type;
+    unsigned char                   Attributes;
+    unsigned char                   Size[3];
+    unsigned char                   State;
+} EFI_FFS_FILE_HEADER;
+
+EFI_COMMON_SECTION_HEADER EFI_SECTION_RAW; //0x19
+EFI_COMMON_SECTION_HEADER EFI_SECTION_FIRMWARE_VOLUME_IMAGE; //0x17
+EFI_FIRMWARE_VOLUME_HEADER volumehdr;
+EFI_FV_BLOCK_MAP_ENTRY blockmap;
+unsigned int64 blockmappadding;
+EFI_FFS_FILE_HEADER filehdr;
+EFI_FIRMWARE_VOLUME_EXT_HEADER vol_ext_hdr;
+unsigned int align;
+EFI_FFS_FILE_HEADER filehdr; //type 09: EFI_FV_FILETYPE_APPLICATION
+EFI_COMMON_SECTION_HEADER section; //type 0x15: EFI_SECTION_USER_INTERFACE
+unsigned char text[0x1C-0x4];
+EFI_COMMON_SECTION_HEADER body; //type 0x10: EFI_SECTION_PE32
+unsigned char data[0x098000];

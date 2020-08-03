@@ -1,0 +1,185 @@
+//--------------------------------------
+//--- 010 Editor v8.0.1 Binary Template
+//
+// File: qc_cryptofooter.bt
+// Author: Bjoern Kerler
+// Revision: 1.0
+// Purpose:
+// Category: QC
+//--------------------------------------
+#define CURRENT_MAJOR_VERSION 1
+#define CURRENT_MINOR_VERSION 3
+
+#define CRYPT_FOOTER_OFFSET 0x4000
+#define CRYPT_FOOTER_TO_PERSIST_OFFSET 0x1000
+#define CRYPT_PERSIST_DATA_SIZE 0x1000
+
+#define MAX_CRYPTO_TYPE_NAME_LEN 64
+
+#define MAX_KEY_LEN 48 //for LG, add +16
+#define SALT_LEN 16
+#define SCRYPT_LEN 32
+#define SHA256_DIGEST_LENGTH 32
+
+/* definitions of flags in the structure below */
+#define CRYPT_MNT_KEY_UNENCRYPTED 0x1 /* The key for the partition is not encrypted. */
+#define CRYPT_ENCRYPTION_IN_PROGRESS 0x2 /* Set when starting encryption,
+                                          * clear when done before rebooting */
+
+#define CRYPT_MNT_MAGIC 0xD0B5B1C4
+#define PERSIST_DATA_MAGIC 0xE950CD44
+
+#define SCRYPT_PROP "ro.crypto.scrypt_params"
+#define SCRYPT_DEFAULTS { 15, 3, 1 }
+
+/* Key Derivation Function algorithms */
+#define KDF_PBKDF2 1
+#define KDF_SCRYPT 2
+#define KDF_SCRYPT_KEYMASTER 5
+
+#define KEYMASTER_BLOB_SIZE 2048
+#define uint32_t unsigned int
+#define bool unsigned int
+#define void unsigned int
+#define KM_AES_IV_SIZE 16
+#define uint8 unsigned char
+#define ptr unsigned int
+
+typedef enum
+{
+    KM_ALGORITHM_RSA = 1,
+    KM_ALGORITHM_EC = 3,
+    KM_ALGORITHM_AES = 32,
+    KM_ALGORITHM_HMAC = 128,
+    KM_ALGORITHM_MAX = 6,
+} keymaster_algorithm_t; 
+
+typedef enum
+{
+    KM_PURPOSE_ENCRYPT = 0,
+    KM_PURPOSE_DECRYPT = 1,
+    KM_PURPOSE_SIGN = 2,
+    KM_PURPOSE_VERIFY = 3,
+    KM_PURPOSE_MAX = 4,
+    KM_PURPOSE_RESERVED = (int) 0xFFFFFFFFULL,
+} keymaster_purpose_t;
+
+typedef enum
+{
+    KM_MODE_ECB = 1,
+    KM_MODE_CBC = 2,
+    KM_MODE_CTR = 3,
+    KM_MODE_GCM = 32,
+    KM_MODE_MAX = 4,
+    KM_BLOCK_MODE_RESERVED = (int) 0xFFFFFFFFULL,
+} keymaster_block_mode_t;
+
+typedef enum
+{
+    KM_PAD_NONE = 1, /* deprecated */
+    KM_PAD_RSA_OAEP = 2,
+    KM_PAD_RSA_PSS = 3,
+    KM_PAD_RSA_PKCS1_1_5_ENCRYPT = 4,
+    KM_PAD_RSA_PKCS1_1_5_SIGN = 5,
+    KM_PAD_PKCS7 = 64,
+    KM_PAD_MAX = 6,
+    KM_PADDING_RESERVED = (int) 0xFFFFFFFFULL,
+} keymaster_padding_t;
+
+typedef enum
+{
+    KM_DIGEST_NONE = 0, /* new, required */
+    DIGEST_NONE = KM_DIGEST_NONE, /* For 0_2 compatibility */
+    KM_DIGEST_MD5 = 1,
+    KM_DIGEST_SHA1 = 2,
+    KM_DIGEST_SHA_2_224 = 3,
+    KM_DIGEST_SHA_2_256 = 4, /* new, required */
+    KM_DIGEST_SHA_2_384 = 5,
+    KM_DIGEST_SHA_2_512 = 6,
+    KM_DIGEST_MAX = 7,
+    KM_DIGEST_RESERVED = (int) 0xFFFFFFFFULL,
+} keymaster_digest_t;
+
+typedef struct _km_key_op_algorithm_v0_t
+{
+    keymaster_algorithm_t alg;
+    keymaster_purpose_t purpose;
+    keymaster_block_mode_t mode;
+    keymaster_padding_t pad;
+    keymaster_digest_t digest;
+    uint32_t keysize;
+    ptr key;
+    uint32_t iv_nonce;
+    uint32_t iv_size;
+    ptr IV;
+    uint32_t auth_data_len;
+    ptr auth_data;
+    uint32_t taglen;
+    ptr tag;
+    bool aead_input_processed;
+    ptr overflow_buf;
+    uint32_t overflow_buf_len;
+    uint32_t overflow_buf_offset;
+    ptr signature;
+    uint32_t signature_len;
+    ptr hash;
+    uint32_t hash_len;
+    ptr hmac_ctx;
+    ptr cipher_ctx;
+    ptr hash_ctx;
+    ptr asymm_buf_data;
+    uint32_t asymm_buf_data_length;
+    uint32_t asymm_buf_data_offset;
+    uint8 IV_key_blob[KM_AES_IV_SIZE];
+} km_key_op_algorithm_v0_t; 
+
+struct qc_new_keyblob // km_decrypt_auth_key_material
+{
+    unsigned char digest[0x20]<bgcolor=cYellow>;
+    km_key_op_algorithm_v0_t km_cipher_op_ctxt<optimize=false,bgcolor=cYellow>; //0x20
+    km_key_op_algorithm_v0_t km_hmac_op_ctxt<optimize=false,bgcolor=cGreen>; //0xA0  
+    unsigned char keymaterial[0x6E0]<bgcolor=cPurple>; //0x120
+};
+
+
+struct crypt_mnt_ftr {
+  unsigned int magic<format=hex>;		/* See above */
+  unsigned short major_version;
+  unsigned short minor_version;
+  unsigned int ftr_size<format=hex>; 	/* in bytes, not including key following */
+  unsigned int flags<format=hex>;		/* See above */
+  unsigned int keysize<format=hex>;	/* in bytes */
+  unsigned int crypt_type<format=hex>;	/* ignored */
+  unsigned int64 fs_size<format=hex>;	/* Size of the encrypted fs, in 512 byte sectors */
+  unsigned int failed_decrypt_count; /* count of # of failed attempts to decrypt and
+				  mount, set to 0 on successful mount */
+  unsigned char crypto_type_name[MAX_CRYPTO_TYPE_NAME_LEN]; /* The type of encryption
+							       needed to decrypt this
+							       partition, null terminated */
+  unsigned int spare2;        /* ignored */
+  unsigned char master_key[MAX_KEY_LEN]; /* The encrypted key for decrypting the filesystem */
+  unsigned char salt[SALT_LEN];   /* The salt used for this encryption */
+  unsigned int64 persist_data_offset[2];  /* Absolute offset to both copies of crypt_persist_data
+                                   * on device with that info, either the footer of the
+                                   * real_blkdevice or the metadata partition. */
+
+  unsigned int persist_data_size<format=hex>;       /* The number of bytes allocated to each copy of the
+                                   * persistent data table*/
+
+  unsigned char  kdf_type<format=hex>; /* The key derivation function used. */
+
+  /* scrypt parameters. See www.tarsnap.com/scrypt/scrypt.pdf */
+  unsigned char  N_factor<format=hex>; /* (1 << N) */
+  unsigned char  r_factor<format=hex>; /* (1 << r) */
+  unsigned char  p_factor<format=hex>; /* (1 << p) */
+  unsigned int64 encrypted_upto<format=hex>;
+  unsigned char hash_first_block[SHA256_DIGEST_LENGTH];
+  //unsigned char keymaster_blob[KEYMASTER_BLOB_SIZE];
+  qc_new_keyblob keyblob;
+  unsigned int keymaster_blob_size<format=hex>;
+  unsigned char scrypted_intermediate_key[SCRYPT_LEN];
+  unsigned char sha256[SHA256_DIGEST_LENGTH];
+};
+
+LittleEndian();
+crypt_mnt_ftr crypto;

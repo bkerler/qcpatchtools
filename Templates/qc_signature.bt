@@ -1,0 +1,103 @@
+//------------------------------------------------
+//--- 010 Editor v8.0 Binary Template
+//
+//      File: qc_signature.bt
+//   Authors: Bjoern Kerler
+//   Version: 1.0
+//   Purpose: 
+//  Category: QC
+// File Mask: 
+//  ID Bytes: 
+//   History: 
+//------------------------------------------------
+struct qcsignature
+{
+    unsigned char data[sections*0x20];
+    unsigned char sig[0x100];
+    unsigned char atte_der[cert1len];
+    unsigned char root_der[cert2len];
+    unsigned char root_ca[cert3len];
+};
+
+typedef struct {
+  unsigned int NumBlocks;
+  unsigned int Length;
+} EFI_FV_BLOCK_MAP_ENTRY;
+
+LittleEndian();
+local short sections=ReadShort(0x2C);
+BigEndian();
+local int cert1len=ReadShort(0x1028+(sections*0x20)+0x100+2)+4;
+local int cert2len=ReadShort(0x1028+(sections*0x20)+0x100+cert1len+2)+4;
+local int cert3len=ReadShort(0x1028+(sections*0x20)+0x100+cert1len+cert2len+2)+4;
+FSeek(0x1028);
+qcsignature sign<optimize=false>;
+FSeek(0x3000);
+LittleEndian();
+
+typedef struct _EFI_FIRMWARE_VOLUME_HEADER {
+    unsigned char ZeroVector[16];
+    unsigned char FileSystemGuid[16]; //EFI_FIRMWARE_FILE_SYSTEM2_GUID, gEfiFirmwareFileSystem2Guid
+    unsigned int64 FvLength<format=hex>;
+    unsigned int Signature<format=hex>; //_FVH
+    unsigned int Attributes<format=hex>;
+    unsigned short HeaderLength<format=hex>;
+    unsigned short Checksum<format=hex>;
+    unsigned short ExtHeaderOffset<format=hex>;
+    unsigned char Reserved[1];
+    unsigned char Revision;
+} EFI_FIRMWARE_VOLUME_HEADER;
+
+typedef union {
+    struct {
+        unsigned char   Header;
+        unsigned char   File;
+    } Checksum;
+    unsigned short TailReference<format=hex>;   // Revision 1
+    unsigned short Checksum16<format=hex>;      // Revision 2
+} EFI_FFS_INTEGRITY_CHECK;
+
+typedef struct _EFI_FFS_FILE_HEADER {
+    unsigned char               Name[16];
+    EFI_FFS_INTEGRITY_CHECK IntegrityCheck;
+    unsigned char                   Type;
+    unsigned char                   Attributes;
+    unsigned char                   Size[3];
+    unsigned char                   State;
+} EFI_FFS_FILE_HEADER;
+
+enum efisections
+{
+    EFI_SECTION_COMPRESSION=0x01,
+    EFI_SECTION_GUID_DEFINED=0x02,
+    EFI_SECTION_DISPOSABLE=0x03,
+};
+
+// Compression types
+#define EFI_NOT_COMPRESSED          0x00
+#define EFI_STANDARD_COMPRESSION    0x01
+#define EFI_CUSTOMIZED_COMPRESSION  0x02
+
+//GUID defined section
+typedef struct _EFI_GUID_DEFINED_SECTION {
+    unsigned char    Size[3];
+    unsigned char    Type;
+    unsigned char SectionDefinitionGuid[16];
+    unsigned short   DataOffset<format=hex>;
+    unsigned short   Attributes<format=hex>;
+} EFI_GUID_DEFINED_SECTION;
+
+EFI_FIRMWARE_VOLUME_HEADER VolumeHeader;
+EFI_FV_BLOCK_MAP_ENTRY    BlockMap[1];
+unsigned int64 value<format=hex>;
+EFI_FFS_FILE_HEADER FileHeader;
+
+//const QByteArray EFI_GUIDED_SECTION_TIANO // A31280AD-481E-41B6-95E8-127F4C984779
+//("\xAD\x80\x12\xA3\x1E\x48\xB6\x41\x95\xE8\x12\x7F\x4C\x98\x47\x79", 16);
+
+//const QByteArray EFI_GUIDED_SECTION_LZMA // EE4E5898-3914-4259-9D6E-DC7BD79403CF
+//("\x98\x58\x4E\xEE\x14\x39\x59\x42\x9D\x6E\xDC\x7B\xD7\x94\x03\xCF", 16);
+
+EFI_GUID_DEFINED_SECTION guiddefined;
+
+unsigned char data[0x2DEAA];

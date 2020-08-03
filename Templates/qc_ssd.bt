@@ -1,0 +1,23 @@
+//------------------------------------------------
+//--- 010 Editor v8.0 Binary Template
+//
+//      File: qc_ssd.bt
+//   Authors: Bjoern Kerler
+//   Version: 1.0
+//   Purpose: 
+//  Category: QC
+// File Mask: 
+//  ID Bytes: 
+//   History: 
+//------------------------------------------------
+struct ks_entry_info_t
+{
+    unsigned int em_version;
+    unsigned char auth_tag[0x20];
+    unsigned int msg_len;
+    unsigned char iv[0x10];
+    unsigned char data[msg_len];
+};
+
+LittleEndian();
+ks_entry_info_t t[4]<optimize=false>;

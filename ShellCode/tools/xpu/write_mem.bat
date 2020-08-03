@@ -1,0 +1,2 @@
+adb shell su -c "/data/local/tmp/qcxploit writemem 8657222C 634000d1020080d2606862f8206822f842100091000680d2400000cb6bffff54000080d2c0035fd6"
+adb shell su -c "/data/local/tmp/qcxploit writemem 865E38A0 2C22578600000000"

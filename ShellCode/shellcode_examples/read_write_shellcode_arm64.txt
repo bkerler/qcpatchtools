@@ -1,0 +1,23 @@
+STP X28, X27, [SP,#-0x60]!
+STP X26, X25, [SP,#0x10]
+STP X24, X23, [SP,#0x20]
+STP X22, X21, [SP,#0x30]
+STP X20, X19, [SP,#0x40]
+STP X29, X30, [SP,#0x50]
+MOV X29, SP
+
+CMP  W0, #0x22
+BEQ  write
+LDR  W0, [X1]
+B exit
+write:
+STR  W2, [X1]
+
+exit:
+LDP X29, X30, [SP,#0x50]
+LDP X20, X19, [SP,#0x40]
+LDP X22, X21, [SP,#0x30]
+LDP X24, X23, [SP,#0x20]
+LDP X26, X25, [SP,#0x10]
+LDP X28, X27, [SP],#0x60
+RET

@@ -1,0 +1,677 @@
+diff --git a/arch/arm/configs/cyanogenmod_bacon_defconfig b/arch/arm/configs/cyanogenmod_bacon_defconfig
+index 324244c7af4..e3e26673273 100644
+--- a/arch/arm/configs/cyanogenmod_bacon_defconfig
++++ b/arch/arm/configs/cyanogenmod_bacon_defconfig
+@@ -336,8 +336,8 @@ CONFIG_INPUT_UINPUT=y
+ CONFIG_INPUT_GPIO=y
+ # CONFIG_VT is not set
+ # CONFIG_LEGACY_PTYS is not set
+-# CONFIG_DEVMEM is not set
+-# CONFIG_DEVKMEM is not set
++CONFIG_DEVMEM=y
++CONFIG_DEVKMEM=y
+ CONFIG_SERIAL_MSM_HS=y
+ CONFIG_HW_RANDOM_MSM=y
+ CONFIG_MSM_ADSPRPC=y
+@@ -591,3 +591,4 @@ CONFIG_CRYPTO_LZ4=y
+ CONFIG_CRYPTO_DEV_QCRYPTO=y
+ CONFIG_CRYPTO_DEV_QCE=y
+ CONFIG_CRYPTO_DEV_QCEDEV=y
++
+diff --git a/arch/arm/mach-msm/include/mach/scm.h b/arch/arm/mach-msm/include/mach/scm.h
+index 9d186ce1428..e704b259dc5 100644
+--- a/arch/arm/mach-msm/include/mach/scm.h
++++ b/arch/arm/mach-msm/include/mach/scm.h
+@@ -36,14 +36,18 @@ static char __n[PAGE_SIZE] __aligned(PAGE_SIZE);
+ #define SCM_BUFFER_PHYS(__buf)	virt_to_phys(__buf)
+ 
+ #ifdef CONFIG_MSM_SCM
++extern int scm_call_with_command(u32 svc_id, u32 cmd_id, u32 len, u32 buf_offset, 
++                          u32 resp_hdr_offset);
+ extern int scm_call(u32 svc_id, u32 cmd_id, const void *cmd_buf, size_t cmd_len,
+ 		void *resp_buf, size_t resp_len);
+ 
++extern int scm_call_no_remap_error(u32 svc_id, u32 cmd_id, const void *cmd_buf, size_t cmd_len,
++		void *resp_buf, size_t resp_len);
++
+ extern int scm_call_noalloc(u32 svc_id, u32 cmd_id, const void *cmd_buf,
+ 		size_t cmd_len, void *resp_buf, size_t resp_len,
+ 		void *scm_buf, size_t scm_buf_size);
+ 
+-
+ extern s32 scm_call_atomic1(u32 svc, u32 cmd, u32 arg1);
+ extern s32 scm_call_atomic2(u32 svc, u32 cmd, u32 arg1, u32 arg2);
+ extern s32 scm_call_atomic3(u32 svc, u32 cmd, u32 arg1, u32 arg2, u32 arg3);
+diff --git a/arch/arm/mach-msm/scm.c b/arch/arm/mach-msm/scm.c
+index 601c42c96ca..01c9f92e551 100644
+--- a/arch/arm/mach-msm/scm.c
++++ b/arch/arm/mach-msm/scm.c
+@@ -172,6 +172,23 @@ static int __scm_call(const struct scm_command *cmd)
+ 	return ret;
+ }
+ 
++static int __scm_call_no_remap_error(const struct scm_command *cmd)
++{
++	int ret;
++	u32 cmd_addr = virt_to_phys(cmd);
++
++	/*
++	 * Flush the entire cache here so callers don't have to remember
++	 * to flush the cache when passing physical addresses to the secure
++	 * side in the buffer.
++	 */
++	flush_cache_all();
++	outer_flush_all();
++	ret = smc(cmd_addr);
++
++	return ret;
++}
++
+ static void scm_inv_range(unsigned long start, unsigned long end)
+ {
+ 	u32 cacheline_size, ctr;
+@@ -277,6 +294,33 @@ int scm_call_noalloc(u32 svc_id, u32 cmd_id, const void *cmd_buf,
+ 
+ }
+ 
++int scm_call_with_command(u32 svc_id, u32 cmd_id, u32 len, u32 buf_offset, 
++                          u32 resp_hdr_offset)
++{
++    struct scm_command cmd;
++    int ret;
++    cmd.len = len;
++    cmd.buf_offset = buf_offset;
++    cmd.resp_hdr_offset = resp_hdr_offset;
++	cmd.id = (svc_id << 10) | cmd_id;
++
++	printk(KERN_INFO "Sending Fully formed SCM Command\n");
++	printk(KERN_INFO "SVC_ID: %d, CMD_ID: %d\n", svc_id, cmd_id);
++	printk(KERN_INFO "len: %08X, buf_offset: %08X, resp_hdr_offset: %08X\n", cmd.len, cmd.buf_offset, cmd.resp_hdr_offset);
++    printk(KERN_INFO "Response buffer address: virtual-%08X, physical-%08X\n", ((unsigned)&cmd)+resp_hdr_offset, virt_to_phys((void*)(((unsigned)&cmd)+resp_hdr_offset)));
++    mutex_lock(&scm_lock);
++    ret = __scm_call(&cmd);
++	mutex_unlock(&scm_lock);
++	if (ret)
++		goto out;
++
++	printk(KERN_INFO "Finished SCM Call");
++
++out:
++	return ret;
++
++}
++
+ /**
+  * scm_call() - Send an SCM command
+  * @svc_id: service identifier
+@@ -302,6 +346,23 @@ int scm_call(u32 svc_id, u32 cmd_id, const void *cmd_buf, size_t cmd_len,
+ 	int ret;
+ 	size_t len = SCM_BUF_LEN(cmd_len, resp_len);
+ 
++    //DEBUG: Printing information about the outgoing request
++	printk(KERN_INFO "Sending SCM Command\n");
++	printk(KERN_INFO "SVC_ID: %d, CMD_ID: %d\n", svc_id, cmd_id);
++	if (cmd_buf != NULL) {
++		size_t i;
++		char* buffer = kmalloc(2*cmd_len+1, GFP_ATOMIC);
++		buffer[0] = '\0';
++		for (i=0; i<cmd_len; i++) {
++			char sub_buf[3];
++			sprintf(sub_buf, "%02X", ((unsigned char*)cmd_buf)[i]); 
++			strcat(buffer, sub_buf);
++		}
++		printk(KERN_INFO "CMD BUF: %s\n", buffer);
++		kfree(buffer);
++	}
++
++
+ 	if (cmd_len > len || resp_len > len)
+ 		return -EINVAL;
+ 
+@@ -311,11 +372,113 @@ int scm_call(u32 svc_id, u32 cmd_id, const void *cmd_buf, size_t cmd_len,
+ 
+ 	ret = scm_call_common(svc_id, cmd_id, cmd_buf, cmd_len, resp_buf,
+ 				resp_len, cmd, len);
++
++		//DEBUG
++	printk(KERN_INFO "Finished SCM Call");
++	if (resp_buf != NULL) {
++		size_t i;
++                char* buffer = kmalloc(2*resp_len+1, GFP_ATOMIC);
++                buffer[0] = '\0';
++                for (i=0; i<resp_len; i++) {
++                        char sub_buf[3];
++                        sprintf(sub_buf, "%02X", ((unsigned char*)resp_buf)[i]);
++                        strcat(buffer, sub_buf);
++                }
++		printk(KERN_INFO "RESP BUF: %s\n", buffer);
++                kfree(buffer);
++	}
++
+ 	kfree(cmd);
+ 	return ret;
+ }
+ EXPORT_SYMBOL(scm_call);
+ 
++/**
++ * scm_call_no_remap_error() - Send an SCM command without remapping the error code
++ * @svc_id: service identifier
++ * @cmd_id: command identifier
++ * @cmd_buf: command buffer
++ * @cmd_len: length of the command buffer
++ * @resp_buf: response buffer
++ * @resp_len: length of the response buffer
++ *
++ * Sends a command to the SCM and waits for the command to finish processing.
++ */
++int scm_call_no_remap_error(u32 svc_id, u32 cmd_id, const void *cmd_buf, size_t cmd_len,
++		void *resp_buf, size_t resp_len)
++{
++	int ret;
++	struct scm_command *cmd;
++	struct scm_response *rsp;
++	unsigned long start, end;
++
++	//DEBUG: Printing information about the outgoing request
++	printk(KERN_INFO "Sending SCM Command (no remap!)\n");
++	printk(KERN_INFO "SVC_ID: %d, CMD_ID: %d\n", svc_id, cmd_id);
++	if (cmd_buf != NULL) {
++		size_t i;
++		char* buffer = kmalloc(2*cmd_len+1, GFP_ATOMIC);
++		buffer[0] = '\0';
++		for (i=0; i<cmd_len; i++) {
++			char sub_buf[3];
++			sprintf(sub_buf, "%02X", ((unsigned char*)cmd_buf)[i]); 
++			strcat(buffer, sub_buf);
++		}
++		printk(KERN_INFO "CMD BUF: %s\n", buffer);
++		kfree(buffer);
++	}
++
++	cmd = kzalloc(cmd_len, resp_len);
++	if (!cmd)
++		return -ENOMEM;
++
++	cmd->id = (svc_id << 10) | cmd_id;
++	if (cmd_buf)
++		memcpy(scm_get_command_buffer(cmd), cmd_buf, cmd_len);
++
++	mutex_lock(&scm_lock);
++	ret = __scm_call_no_remap_error(cmd);
++	mutex_unlock(&scm_lock);
++	if (ret)
++		goto out;
++
++	rsp = scm_command_to_response(cmd);
++	start = (unsigned long)rsp;
++
++	do {
++		scm_inv_range(start, start + sizeof(*rsp));
++	} while (!rsp->is_complete);
++
++	end = (unsigned long)scm_get_response_buffer(rsp) + resp_len;
++	scm_inv_range(start, end);
++
++	if (resp_buf)
++		memcpy(resp_buf, scm_get_response_buffer(rsp), resp_len);
++
++	//DEBUG
++	printk(KERN_INFO "Finished SCM Call");
++	if (resp_buf != NULL) {
++		size_t i;
++                char* buffer = kmalloc(2*resp_len+1, GFP_ATOMIC);
++                buffer[0] = '\0';
++                for (i=0; i<resp_len; i++) {
++                        char sub_buf[3];
++                        sprintf(sub_buf, "%02X", ((unsigned char*)resp_buf)[i]);
++                        strcat(buffer, sub_buf);
++                }
++		printk(KERN_INFO "RESP BUF: %s\n", buffer);
++                kfree(buffer);
++	}
++
++out:
++	kfree(cmd);
++	return ret;
++}
++EXPORT_SYMBOL(scm_call_no_remap_error);
++
++
++
++
+ #define SCM_CLASS_REGISTER	(0x2 << 8)
+ #define SCM_MASK_IRQS		BIT(5)
+ #define SCM_ATOMIC(svc, cmd, n) (((((svc) << 10)|((cmd) & 0x3ff)) << 12) | \
+@@ -351,6 +514,10 @@ s32 scm_call_atomic1(u32 svc, u32 cmd, u32 arg1)
+ 		: "=r" (r0)
+ 		: "r" (r0), "r" (r1), "r" (r2)
+ 		: "r3");
++    printk(KERN_INFO "Sending atomic SCM Command\n");
++    printk(KERN_INFO "SVC_ID: %d, CMD_ID: %d\n", svc, cmd);
++    printk(KERN_INFO "arg1: %08X\n", arg1);
++    printk(KERN_INFO "res: %08X\n", r0);
+ 	return r0;
+ }
+ EXPORT_SYMBOL(scm_call_atomic1);
+@@ -385,6 +552,10 @@ s32 scm_call_atomic2(u32 svc, u32 cmd, u32 arg1, u32 arg2)
+ 		"smc	#0	@ switch to secure world\n"
+ 		: "=r" (r0)
+ 		: "r" (r0), "r" (r1), "r" (r2), "r" (r3));
++    printk(KERN_INFO "Sending atomic SCM Command\n");
++    printk(KERN_INFO "SVC_ID: %d, CMD_ID: %d\n", svc, cmd);
++    printk(KERN_INFO "arg1: %08X, arg2: %08X\n", arg1, arg2);
++    printk(KERN_INFO "res: %08X\n", r0);
+ 	return r0;
+ }
+ EXPORT_SYMBOL(scm_call_atomic2);
+@@ -422,6 +593,10 @@ s32 scm_call_atomic3(u32 svc, u32 cmd, u32 arg1, u32 arg2, u32 arg3)
+ 		"smc	#0	@ switch to secure world\n"
+ 		: "=r" (r0)
+ 		: "r" (r0), "r" (r1), "r" (r2), "r" (r3), "r" (r4));
++    printk(KERN_INFO "Sending atomic SCM Command\n");
++    printk(KERN_INFO "SVC_ID: %d, CMD_ID: %d\n", svc, cmd);
++    printk(KERN_INFO "arg1: %08X, arg2: %08X, arg3: %08X\n", arg1, arg2, arg3);
++    printk(KERN_INFO "res: %08X\n", r0);
+ 	return r0;
+ }
+ EXPORT_SYMBOL(scm_call_atomic3);
+@@ -452,6 +627,10 @@ s32 scm_call_atomic4_3(u32 svc, u32 cmd, u32 arg1, u32 arg2,
+ 		"smc	#0	@ switch to secure world\n"
+ 		: "=r" (r0), "=r" (r1), "=r" (r2)
+ 		: "r" (r0), "r" (r1), "r" (r2), "r" (r3), "r" (r4), "r" (r5));
++    printk(KERN_INFO "Sending atomic SCM command\n");
++    printk(KERN_INFO "SVC_ID: %d, CMD_ID: %d\n", svc, cmd);
++    printk(KERN_INFO "arg1: %08X, arg2: %08X, arg3: %08X, arg4: %08X\n", arg1, arg2, arg3, arg4);
++    printk(KERN_INFO "r0: %08X, r1: %08X, r2: %08X\n", r0, r1, r2);
+ 	ret = r0;
+ 	if (ret1)
+ 		*ret1 = r1;
+diff --git a/drivers/misc/qseecom.c b/drivers/misc/qseecom.c
+index c598762eac1..16ff3c057cc 100644
+--- a/drivers/misc/qseecom.c
++++ b/drivers/misc/qseecom.c
+@@ -55,6 +55,23 @@
+ #define QSEE_VERSION_05			0x405000
+ 
+ 
++struct __attribute__((packed)) qseecom_send_raw_scm_req {
++        uint32_t svc_id;
++        uint32_t cmd_id;
++        void *cmd_req_buf; /* in */
++        unsigned int cmd_req_len; /* in */
++        void *resp_buf; /* in/out */
++        unsigned int resp_len; /* in/out */
++};
++
++struct __attribute__((packed)) qseecom_send_atomic_scm_req {
++    uint32_t svc_id;
++    uint32_t num_args;
++    uint32_t arg1;
++    uint32_t arg2;
++    uint32_t arg3;
++    uint32_t arg4;
++};
+ 
+ #define QSEOS_CHECK_VERSION_CMD		0x00001803
+ 
+@@ -1395,68 +1412,7 @@ exit:
+ static int __validate_send_cmd_inputs(struct qseecom_dev_handle *data,
+ 				struct qseecom_send_cmd_req *req)
+ {
+-	if (!data || !data->client.ihandle) {
+-		pr_err("Client or client handle is not initialized\n");
+-		return -EINVAL;
+-	}
+-	if (((req->resp_buf == NULL) && (req->resp_len != 0)) ||
+-						(req->cmd_req_buf == NULL)) {
+-		pr_err("cmd buffer or response buffer is null\n");
+-		return -EINVAL;
+-	}
+-	if (((uint32_t)req->cmd_req_buf < data->client.user_virt_sb_base) ||
+-		((uint32_t)req->cmd_req_buf >= (data->client.user_virt_sb_base +
+-					data->client.sb_length))) {
+-		pr_err("cmd buffer address not within shared bufffer\n");
+-		return -EINVAL;
+-	}
+-	if (((uintptr_t)req->resp_buf <
+-				data->client.user_virt_sb_base)  ||
+-		((uintptr_t)req->resp_buf >=
+-		(data->client.user_virt_sb_base + data->client.sb_length))) {
+-		pr_err("response buffer address not within shared bufffer\n");
+-		return -EINVAL;
+-	}
+-	if ((req->cmd_req_len == 0) ||
+-		(req->cmd_req_len > data->client.sb_length) ||
+-		(req->resp_len > data->client.sb_length)) {
+-		pr_err("cmd buf length or response buf length not valid\n");
+-		return -EINVAL;
+-	}
+-	if (req->cmd_req_len > UINT_MAX - req->resp_len) {
+-		pr_err("Integer overflow detected in req_len & rsp_len\n");
+-		return -EINVAL;
+-	}
+-
+-	if ((req->cmd_req_len + req->resp_len) > data->client.sb_length) {
+-		pr_debug("Not enough memory to fit cmd_buf.\n");
+-		pr_debug("resp_buf. Required: %u, Available: %zu\n",
+-				(req->cmd_req_len + req->resp_len),
+-					data->client.sb_length);
+-		return -ENOMEM;
+-	}
+-	if ((uintptr_t)req->cmd_req_buf > (ULONG_MAX - req->cmd_req_len)) {
+-		pr_err("Integer overflow in req_len & cmd_req_buf\n");
+-		return -EINVAL;
+-	}
+-	if ((uintptr_t)req->resp_buf > (ULONG_MAX - req->resp_len)) {
+-		pr_err("Integer overflow in resp_len & resp_buf\n");
+-		return -EINVAL;
+-	}
+-	if (data->client.user_virt_sb_base >
+-					(ULONG_MAX - data->client.sb_length)) {
+-		pr_err("Integer overflow in user_virt_sb_base & sb_length\n");
+-		return -EINVAL;
+-	}
+-	if ((((uintptr_t)req->cmd_req_buf + req->cmd_req_len) >
+-		((uintptr_t)data->client.user_virt_sb_base +
+-						data->client.sb_length)) ||
+-		(((uintptr_t)req->resp_buf + req->resp_len) >
+-		((uintptr_t)data->client.user_virt_sb_base +
+-						data->client.sb_length))) {
+-		pr_err("cmd buf or resp buf is out of shared buffer region\n");
+-		return -EINVAL;
+-	}
++	
+ 	return 0;
+ }
+ 
+@@ -1494,6 +1450,29 @@ static int __qseecom_send_cmd(struct qseecom_dev_handle *data,
+ 		return -EINVAL;
+ 	}
+ 
++    printk(KERN_INFO "Request pointer physical address: %p\n", (void*)&send_data_req.req_ptr);
++    printk(KERN_INFO "Response pointer physical address: %p\n", (void*)&send_data_req.rsp_ptr);
++    {
++        if (req!=NULL)
++        if (req->cmd_req_buf!=NULL)
++        {
++           size_t i;
++           char* buffer = kmalloc(2*req->cmd_req_len+1, GFP_ATOMIC);
++           if (buffer!=NULL) 
++           {
++               buffer[0] = '\0';
++               for (i=0; i<req->cmd_req_len; i++) 
++               {
++                    char sub_buf[3];
++                    sprintf(sub_buf, "%02X", ((unsigned char*)req->cmd_req_buf)[i]);
++                    strcat(buffer, sub_buf);
++               }
++               printk(KERN_INFO "qseecom_send_cmd(32): CONTENT OF SEND CMD: %s\n", buffer);
++               kfree(buffer);
++           }
++        }
++    }
++
+ 	send_data_req.qsee_cmd_id = QSEOS_CLIENT_SEND_DATA_COMMAND;
+ 	send_data_req.app_id = data->client.app_id;
+ 	send_data_req.req_ptr = (void *)(__qseecom_uvirt_to_kphys(data,
+@@ -1563,23 +1542,6 @@ int __boundary_checks_offset(struct qseecom_send_modfd_cmd_req *cmd_req,
+ 			struct qseecom_dev_handle *data, bool listener_svc,
+ 			int i) {
+ 
+-	if ((!listener_svc) && (cmd_req->ifd_data[i].fd > 0)) {
+-		if ((cmd_req->cmd_req_len < sizeof(uint32_t)) ||
+-				(cmd_req->ifd_data[i].cmd_buf_offset >
+-				cmd_req->cmd_req_len - sizeof(uint32_t))) {
+-			pr_err("Invalid offset 0x%x\n",
+-					cmd_req->ifd_data[i].cmd_buf_offset);
+-			return -EINVAL;
+-		}
+-	} else if ((listener_svc) && (lstnr_resp->ifd_data[i].fd > 0)) {
+-		if ((lstnr_resp->resp_len < sizeof(uint32_t)) ||
+-				(lstnr_resp->ifd_data[i].cmd_buf_offset >
+-				lstnr_resp->resp_len - sizeof(uint32_t))) {
+-			pr_err("Invalid offset 0x%x\n",
+-					lstnr_resp->ifd_data[i].cmd_buf_offset);
+-			return -EINVAL;
+-		}
+-	}
+ 	return 0;
+ }
+ 
+@@ -1671,30 +1633,6 @@ static int __qseecom_update_cmd_buf(void *msg, bool cleanup,
+ 			struct qseecom_sg_entry *update;
+ 			int j = 0;
+ 
+-			if ((!listener_svc) && (cmd_req->ifd_data[i].fd > 0)) {
+-				if ((cmd_req->cmd_req_len <
+-					SG_ENTRY_SZ * sg_ptr->nents) ||
+-					(cmd_req->ifd_data[i].cmd_buf_offset >
+-					(cmd_req->cmd_req_len -
+-					SG_ENTRY_SZ * sg_ptr->nents))) {
+-					pr_err("Invalid offset = 0x%x\n",
+-						cmd_req->ifd_data[i].
+-						cmd_buf_offset);
+-					goto err;
+-				}
+-			} else if ((listener_svc) &&
+-					(lstnr_resp->ifd_data[i].fd > 0)) {
+-				if ((lstnr_resp->resp_len <
+-					SG_ENTRY_SZ * sg_ptr->nents) ||
+-					(lstnr_resp->ifd_data[i].cmd_buf_offset >
+-					(lstnr_resp->resp_len -
+-					SG_ENTRY_SZ * sg_ptr->nents))) {
+-					pr_err("Invalid offset = 0x%x\n",
+-						lstnr_resp->ifd_data[i].
+-							cmd_buf_offset);
+-					goto err;
+-				}
+-			}
+ 			update = (struct qseecom_sg_entry *) field;
+ 			for (j = 0; j < sg_ptr->nents; j++) {
+ 				if (cleanup) {
+@@ -1733,7 +1671,6 @@ static int qseecom_send_modfd_cmd(struct qseecom_dev_handle *data,
+ 					void __user *argp)
+ {
+ 	int ret = 0;
+-	int i;
+ 	struct qseecom_send_modfd_cmd_req req;
+ 	struct qseecom_send_cmd_req send_cmd_req;
+ 
+@@ -1751,14 +1688,6 @@ static int qseecom_send_modfd_cmd(struct qseecom_dev_handle *data,
+ 	if (__validate_send_cmd_inputs(data, &send_cmd_req))
+ 		return -EINVAL;
+ 
+-	/* validate offsets */
+-	for (i = 0; i < MAX_ION_FD; i++) {
+-		if (req.ifd_data[i].cmd_buf_offset >= req.cmd_req_len) {
+-			pr_err("Invalid offset %d = 0x%x\n",
+-				i, req.ifd_data[i].cmd_buf_offset);
+-			return -EINVAL;
+-		}
+-	}
+ 	req.cmd_req_buf = (void *)__qseecom_uvirt_to_kvirt(data,
+ 						(uint32_t)req.cmd_req_buf);
+ 	req.resp_buf = (void *)__qseecom_uvirt_to_kvirt(data,
+@@ -2515,7 +2444,6 @@ static int qseecom_send_modfd_resp(struct qseecom_dev_handle *data,
+ 						void __user *argp)
+ {
+ 	struct qseecom_send_modfd_listener_resp resp;
+-	int i;
+ 	struct qseecom_registered_listener_list *this_lstnr = NULL;
+ 
+ 	if (copy_from_user(&resp, argp, sizeof(resp))) {
+@@ -2530,23 +2458,7 @@ static int qseecom_send_modfd_resp(struct qseecom_dev_handle *data,
+ 		pr_err("Invalid resp_buf_ptr\n");
+ 		return -EINVAL;
+ 	}
+-	/* validate offsets */
+-	for (i = 0; i < MAX_ION_FD; i++) {
+-		if (resp.ifd_data[i].cmd_buf_offset >= resp.resp_len) {
+-			pr_err("Invalid offset %d = 0x%x\n",
+-				i, resp.ifd_data[i].cmd_buf_offset);
+-			return -EINVAL;
+-		}
+-	}
+ 
+-	if (((uint32_t)resp.resp_buf_ptr <
+-			this_lstnr->user_virt_sb_base)
+-			|| ((uint32_t)resp.resp_buf_ptr >=
+-			(this_lstnr->user_virt_sb_base +
+-			this_lstnr->sb_length))) {
+-		pr_err("resp_buf_ptr address not within shared buffer\n");
+-		return -EINVAL;
+-	}
+ 	resp.resp_buf_ptr = (uint32_t)this_lstnr->sb_virt +
+ 		(resp.resp_buf_ptr - this_lstnr->user_virt_sb_base);
+ 	__qseecom_update_cmd_buf(&resp, false, data, true);
+@@ -3572,6 +3484,47 @@ static int qseecom_save_partition_hash(void __user *argp)
+ 	return 0;
+ }
+ 
++static int send_atomic_scm(void __user *argp)
++{
++    int ret = 0;
++   struct qseecom_send_atomic_scm_req req;
++   ret = copy_from_user(&req, argp, sizeof(req));
++   if (ret) {
++       pr_err("copy_from_user failed\n");
++       return ret;
++   }
++    if (req.num_args == 1) {
++        ret = scm_call_atomic1(0, req.svc_id, req.arg1);
++    }
++    else if (req.num_args == 2) {
++        ret = scm_call_atomic2(0, req.svc_id, req.arg1, req.arg2);
++    }
++    else if (req.num_args == 3) {
++        ret = scm_call_atomic3(0, req.svc_id, req.arg1, req.arg2, req.arg3);
++    }
++    else if (req.num_args == 4) {
++        u32 ret1;
++        u32 ret2;
++        ret = scm_call_atomic4_3(0, req.svc_id, req.arg1, req.arg2, req.arg3, req.arg4, &ret1, &ret2);
++        printk(KERN_INFO "Atomic SCM RET1: %08X, RET2: %08X\n", ret1, ret2);
++    }
++   return ret;
++}
++
++static int send_raw_scm(void __user *argp)
++{
++   int ret = 0;
++   struct qseecom_send_raw_scm_req req;
++   ret = copy_from_user(&req, argp, sizeof(req));
++   if (ret) {
++       pr_err("copy_from_user failed\n");
++       return ret;
++   }
++   ret = scm_call_no_remap_error(req.svc_id, req.cmd_id, req.cmd_req_buf, req.cmd_req_len, req.resp_buf, req.resp_len);
++   return ret;
++}
++
++
+ static long qseecom_ioctl(struct file *file, unsigned cmd,
+ 		unsigned long arg)
+ {
+@@ -3608,6 +3561,22 @@ static long qseecom_ioctl(struct file *file, unsigned cmd,
+ 			pr_err("failed qseecom_register_listener: %d\n", ret);
+ 		break;
+ 	}
++   case QSEECOM_IOCTL_SEND_RAW_SCM: {
++       atomic_inc(&data->ioctl_count);
++       ret = send_raw_scm(argp);
++       atomic_dec(&data->ioctl_count);
++       flush_cache_all();
++       outer_flush_all();
++       break;
++   }
++    case QSEECOM_IOCTL_SEND_ATOMIC_SCM: {
++       atomic_inc(&data->ioctl_count);
++       ret = send_atomic_scm(argp);
++       atomic_dec(&data->ioctl_count);
++       flush_cache_all();
++       outer_flush_all();        
++        break;
++   }
+ 	case QSEECOM_IOCTL_UNREGISTER_LISTENER_REQ: {
+ 		if ((data->listener.id == 0) ||
+ 			(data->type != QSEECOM_LISTENER_SERVICE)) {
+diff --git a/drivers/staging/prima/CORE/MAC/src/pe/lim/limP2P.c b/drivers/staging/prima/CORE/MAC/src/pe/lim/limP2P.c
+index 04028f0b91e..1aea3c8f2e2 100644
+--- a/drivers/staging/prima/CORE/MAC/src/pe/lim/limP2P.c
++++ b/drivers/staging/prima/CORE/MAC/src/pe/lim/limP2P.c
+@@ -972,7 +972,7 @@ void limSendP2PActionFrame(tpAniSirGlobal pMac, tpSirMsgQ pMsg)
+     v_U8_t              *pNewP2PIe = NULL;
+     v_U16_t             remainLen = 0;
+ #ifdef WLAN_FEATURE_11W
+-    tpSirMacMgmtHdr        pMacHdr;
++    tpSirMacMgmtHdr        pMacHdr=0;
+     tpSirMacActionFrameHdr pActionHdr;
+ #endif
+     nBytes = pMbMsg->msgLen - sizeof(tSirMbMsg);
+diff --git a/fs/namei.c b/fs/namei.c
+index 9f0b14c913e..ef95dea5d64 100644
+--- a/fs/namei.c
++++ b/fs/namei.c
+@@ -2797,7 +2797,7 @@ out:
+ static long do_rmdir(int dfd, const char __user *pathname)
+ {
+ 	int error = 0;
+-	char * name;
++	char * name = "";
+ 	struct dentry *dentry;
+ 	struct nameidata nd;
+ 
+@@ -2893,7 +2893,7 @@ int vfs_unlink(struct inode *dir, struct dentry *dentry)
+ static long do_unlinkat(int dfd, const char __user *pathname)
+ {
+ 	int error;
+-	char *name;
++	char *name="";
+ 	struct dentry *dentry;
+ 	struct nameidata nd;
+ 	struct inode *inode = NULL;
+@@ -3293,8 +3293,8 @@ SYSCALL_DEFINE4(renameat, int, olddfd, const char __user *, oldname,
+ 	struct dentry *old_dentry, *new_dentry;
+ 	struct dentry *trap;
+ 	struct nameidata oldnd, newnd;
+-	char *from;
+-	char *to;
++	char *from="";
++	char *to="";
+ 	int error;
+ 
+ 	error = user_path_parent(olddfd, oldname, &oldnd, &from);
+diff --git a/include/linux/qseecom.h b/include/linux/qseecom.h
+index b63b36e4288..6f20a719f83 100644
+--- a/include/linux/qseecom.h
++++ b/include/linux/qseecom.h
+@@ -254,10 +254,16 @@ struct qseecom_send_modfd_listener_resp {
+ #define QSEECOM_IOCTL_SEND_MODFD_RESP \
+ 	_IOWR(QSEECOM_IOC_MAGIC, 21, struct qseecom_send_modfd_listener_resp)
+ 
++#define QSEECOM_IOCTL_SEND_RAW_SCM \
++        _IOWR(QSEECOM_IOC_MAGIC, 22, struct qseecom_send_raw_scm_req)
++
+ #define QSEECOM_IOCTL_SET_BUS_SCALING_REQ \
+ 	_IOWR(QSEECOM_IOC_MAGIC, 23, int)
+ 
+ #define QSEECOM_IOCTL_UPDATE_KEY_USER_INFO_REQ \
+ 	_IOWR(QSEECOM_IOC_MAGIC, 24, struct qseecom_update_key_userinfo_req)
+ 
++#define QSEECOM_IOCTL_SEND_ATOMIC_SCM \
++   _IOWR(QSEECOM_IOC_MAGIC, 25, struct qseecom_send_atomic_scm_req)
++
+ #endif /* __QSEECOM_H_ */
+diff --git a/net/unix/af_unix.c b/net/unix/af_unix.c
+index 1e9c07358d2..a6a671bcae4 100644
+--- a/net/unix/af_unix.c
++++ b/net/unix/af_unix.c
+@@ -945,7 +945,7 @@ static int unix_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
+ 	struct dentry *dentry = NULL;
+ 	struct path path;
+ 	int err;
+-	unsigned hash;
++	unsigned hash=0;
+ 	struct unix_address *addr;
+ 	struct hlist_head *list;
+ 
